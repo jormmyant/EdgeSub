@@ -5,11 +5,12 @@ export async function onRequest (context, isBase64 = false) {
     const { request } = context;
     const URLObject = new URL(request.url);
     // do convert
-    const Proxies = await getParsedSubData(
+    const { Proxies } = await getParsedSubData(
         URLObject.searchParams.get("url"), 
         context.env.EdgeSubDB, 
         URLObject.searchParams.get("show_host") === "true",
         JSON.parse(URLObject.searchParams.get("http_headers")),
+        URLObject.searchParams.get("ExcludeRegExpPattern"),
     );
     let Dumper = new ShareLinkDumper();
     let ShareLinkArray = [];
