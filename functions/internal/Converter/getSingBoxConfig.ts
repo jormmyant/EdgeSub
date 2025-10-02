@@ -1,6 +1,8 @@
 import { TrulyAssign } from "../utils/TrulyAssign";
 import SingBoxDumper from "../Dumpers/sing-box.js";
-import { MetaToSingRuleMapping } from "../data/rule/MetaToSingMapping.js";
+import { MetaToSingRuleMapping } from "../data/rule/MetaToSingMapping.ts";
+import { MetaToSingLogicalRule } from "../data/rule/MetaToSingLogicalRule.ts";
+import { transformGeoRef } from "../data/ruleset/transformGeoRef.ts";
 import { parseJSON5 } from "confbox";
 
 const BasicConfig = {
@@ -15,6 +17,7 @@ const BasicConfig = {
 
 
 import { RuleProviderReader } from "../RuleProviderReader/main.js";
+import mod from "astro/zod";
 
 export async function getSingBoxConfig (
     Proxies, 
@@ -39,10 +42,24 @@ export async function getSingBoxConfig (
         }
     }).filter(i => !!i);
     // append proxies
+    SingBoxConfig.outbounds = SingBoxConfig.outbounds || [];
     SingBoxConfig.outbounds = [
         ...SingBoxConfig.outbounds, 
         ...Proxies.map(i => Dumper[i.__Type](i))
     ]
+    // check for essential outbounds
+    if (!SingBoxConfig.outbounds.find(i => i.tag === "DIRECT")) {
+        SingBoxConfig.outbounds.push({
+            type: "direct",
+            tag: "DIRECT"
+        })
+    }
+    if (!SingBoxConfig.outbounds.find(i => i.tag === "REJECT")) {
+        SingBoxConfig.outbounds.push({
+            type: "block",
+            tag: "REJECT"
+        })
+    }
 
     // proxy clash external ui archive
     if (SingBoxConfig.experimental.clash_api.external_ui_download_url) {
@@ -181,38 +198,55 @@ export async function getSingBoxConfig (
 
         // handle GEOIP and GEOSITE
         if (type === "geoip" || type === "geosite") {
-            const RuleSetTag = `${type}-${payload.toLowerCase()}`;
+            const { headlessRule, headlessRuleSet } = transformGeoRef(type, payload, Config.RuleProvidersProxy);
+
+            SingBoxConfig.route.rules.push({
+                ...headlessRule,
+                action: "route",
+                outbound: outboundID
+            });
 
             // if we cant find rule set with same tag (ie append before), 
-            if (!(SingBoxConfig.route.rule_set.find(i => i.tag === RuleSetTag))) { 
-                // let edge-sub preprocess the rule-set
-                // construct url
-                let RuleSetURLObject = new URL(Config.RuleProvidersProxy);
-                    RuleSetURLObject.pathname = "/ruleset/proxy";
-                    RuleSetURLObject.search = "";
-                    RuleSetURLObject.searchParams.append("target", `https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/${RuleSetTag}.srs`);
-                const RuleSetURL = RuleSetURLObject.toString();
-
+            if (headlessRuleSet && !(SingBoxConfig.route.rule_set.find(i => i.tag === headlessRuleSet.tag))) { 
                 // append rule-set
                 SingBoxConfig.route.rule_set.push({
-                    type: "remote",
-                    tag: RuleSetTag,
-                    format: "binary",
-                    url: RuleSetURL,
+                    ...headlessRuleSet,
                     download_detour: "DIRECT"
                 })
             }
+            continue;
+        }
 
-            // use the appended rule-set to route 
+        // handle the types that payload need to be number
+        if (type === "source_port" || type === "port") {
+            let numPayload = Number(payload);
+            if (isNaN(numPayload)) {
+                console.warn(`[getSingBoxConfig] invalid port number: ${payload}, skiping rule ${i}`);
+                continue;
+            }
             SingBoxConfig.route.rules.push({
-                rule_set: RuleSetTag,
+                [type]: numPayload,
                 action: "route",
                 outbound: outboundID
             });
             continue;
         }
 
-        // any other route rules else should works... not sure since sing-box always breaking 
+        // handle AND | OR Logic rules
+        if (type === "and" || type === "or") {
+            let { headlessRule, headlessRuleSet } = MetaToSingLogicalRule(type, payload, Config.RuleProvidersProxy);
+            headlessRuleSet = headlessRuleSet.filter(i => !!i && !SingBoxConfig.route.rule_set.find(t => t.tag === i.tag));
+
+            SingBoxConfig.route.rule_set.push(...headlessRuleSet);
+            SingBoxConfig.route.rules.push({
+                ...headlessRule,
+                action: "route",
+                outbound: outboundID
+            });
+            continue;
+        }
+
+        // any other route rules else should works... not sure 
         SingBoxConfig.route.rules.push({
             [type]: payload,
             action: "route",

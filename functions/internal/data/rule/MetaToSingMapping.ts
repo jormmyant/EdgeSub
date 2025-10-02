@@ -26,12 +26,16 @@ export const MetaToSingRuleMapping = {
 
     "NETWORK": "network",
 
+    "UID": "user_id",
 
-    // "AND": "and",
-    // "OR": "or",
-    // "NOT": "not",
+    "IN_NAME": "inbound",
 
-    // TBD: LOGIC RULES
+    "Sing_PROTOCOL": "protocol",
+
+
+    "AND": "and",
+    "OR": "or",
+    // "NOT": "invert", // #TBD: invert rules
 }
 
 // mihomo source route rule w/o matching or no need to convert
